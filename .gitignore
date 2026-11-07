@@ -1,0 +1,9 @@
+# Generated build and installer output
+/elmer-syncd-linux
+/dist/
+/installer/Output/
+/installer/test-install/
+bin/
+*.exe
+*.tmp
+vendor/

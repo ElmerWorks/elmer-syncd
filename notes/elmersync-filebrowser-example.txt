@@ -1,0 +1,342 @@
+
+// This example provides:
+// remote list request
+// JSON parsing into RemoteEntry
+// folder tree adapter for a RecyclerView
+// remote file read and write using the host path
+// a safe pattern for working with the ElmerSync host root 
+
+
+// Android example: Kotlin client + RecyclerView adapter for ElmerSync remote browser
+
+// Kotlin remote browser client and adapter
+package com.example.doswriter
+
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.util.Locale
+
+data class RemoteEntry(
+    val name: String,
+    val isDir: Boolean,
+    val size: Long,
+    val mtime: Long
+)
+
+data class RemoteListResponse(
+    val path: String,
+    val entries: List<RemoteEntry>
+)
+
+class RemoteBrowserClient(
+    private val baseUrl: String,
+    private val token: String? = null
+) {
+    fun listDir(path: String): RemoteListResponse {
+        val encoded = URLEncoder.encode(path, "UTF-8")
+        val url = URL("$baseUrl/api/list?path=$encoded")
+
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15000
+            readTimeout = 15000
+            if (!token.isNullOrBlank()) {
+                setRequestProperty("X-API-Token", token)
+            }
+        }
+
+        val status = conn.responseCode
+        if (status != 200) {
+            val error = conn.errorStream?.bufferedReader()?.use { it.readText() }
+            throw RuntimeException("listDir failed: HTTP $status $error")
+        }
+
+        val body = conn.inputStream.bufferedReader().use { it.readText() }
+        val root = JSONObject(body)
+
+        val arr = root.getJSONArray("entries")
+        val items = mutableListOf<RemoteEntry>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            items += RemoteEntry(
+                name = obj.optString("name"),
+                isDir = obj.optBoolean("isDir", false),
+                size = obj.optLong("size", 0L),
+                mtime = obj.optLong("mtime", 0L)
+            )
+        }
+
+        return RemoteListResponse(
+            path = root.optString("path", path),
+            entries = items
+        )
+    }
+
+    fun readFile(path: String): String {
+        val encoded = URLEncoder.encode(path, "UTF-8")
+        val url = URL("$baseUrl/api/read?path=$encoded")
+
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15000
+            readTimeout = 15000
+            if (!token.isNullOrBlank()) {
+                setRequestProperty("X-API-Token", token)
+            }
+        }
+
+        val status = conn.responseCode
+        if (status != 200) {
+            val error = conn.errorStream?.bufferedReader()?.use { it.readText() }
+            throw RuntimeException("readFile failed: HTTP $status $error")
+        }
+
+        return conn.inputStream.bufferedReader().use { it.readText() }
+    }
+
+    fun writeFile(path: String, content: String) {
+        val url = URL("$baseUrl/api/write")
+
+        val payload = JSONObject().apply {
+            put("path", path)
+            put("content", content)
+        }
+
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 15000
+            readTimeout = 15000
+            setRequestProperty("Content-Type", "application/json")
+            if (!token.isNullOrBlank()) {
+                setRequestProperty("X-API-Token", token)
+            }
+        }
+
+        conn.outputStream.use { os: OutputStream ->
+            os.write(payload.toString().toByteArray(Charsets.UTF_8))
+            os.flush()
+        }
+
+        val status = conn.responseCode
+        if (status != 200) {
+            val error = conn.errorStream?.bufferedReader()?.use { it.readText() }
+            throw RuntimeException("writeFile failed: HTTP $status $error")
+        }
+    }
+}
+
+// Example usage
+fun demoRemoteBrowser() {
+    val client = RemoteBrowserClient(
+        baseUrl = "http://192.168.1.50:12345",
+        token = "demo"
+    )
+
+    // List current root
+    val root = client.listDir(".")
+    for (entry in root.entries) {
+        val kind = if (entry.isDir) "DIR" else "FILE"
+        println("${entry.name} | $kind | size=${entry.size}")
+    }
+
+    // Read a file
+    val text = client.readFile("notes.txt")
+    println(text)
+
+    // Write a file
+    client.writeFile("notes.txt", "updated content from Android\n")
+}
+
+// RecyclerView adapter for a remote folder tree
+class FolderTreeAdapter(
+    private val items: MutableList<RemoteEntry>,
+    private val onFolderClick: (RemoteEntry) -> Unit,
+    private val onFileClick: (RemoteEntry) -> Unit
+) : RecyclerView.Adapter<FolderTreeAdapter.VH>() {
+
+    class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val nameText: TextView = itemView.findViewById(android.R.id.text1)
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val view = LayoutInflater.from(parent.context)
+            .inflate(android.R.layout.simple_list_item_1, parent, false)
+        return VH(view)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val item = items[position]
+        val prefix = if (item.isDir) "[DIR] " else "[FILE] "
+        holder.nameText.text = prefix + item.name
+
+        holder.itemView.setOnClickListener {
+            if (item.isDir) {
+                onFolderClick(item)
+            } else {
+                onFileClick(item)
+            }
+        }
+    }
+
+    override fun getItemCount(): Int = items.size
+
+    fun update(newItems: List<RemoteEntry>) {
+        items.clear()
+        items.addAll(newItems)
+        notifyDataSetChanged()
+    }
+}
+
+
+// Java equivalent for the same idea:
+
+/*
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.List;
+
+public class RemoteBrowserClientJava {
+    private final String baseUrl;
+    private final String token;
+
+    public static class RemoteEntry {
+        public String name;
+        public boolean isDir;
+        public long size;
+        public long mtime;
+
+        public RemoteEntry(String name, boolean isDir, long size, long mtime) {
+            this.name = name;
+            this.isDir = isDir;
+            this.size = size;
+            this.mtime = mtime;
+        }
+    }
+
+    public static class RemoteListResponse {
+        public String path;
+        public List<RemoteEntry> entries = new ArrayList<>();
+    }
+
+    public RemoteBrowserClientJava(String baseUrl, String token) {
+        this.baseUrl = baseUrl;
+        this.token = token;
+    }
+
+    public RemoteListResponse listDir(String path) throws Exception {
+        String urlString = baseUrl + "/api/list?path=" + URLEncoder.encode(path, "UTF-8");
+        URL url = new URL(urlString);
+
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(15000);
+        if (token != null && !token.isEmpty()) {
+            conn.setRequestProperty("X-API-Token", token);
+        }
+
+        if (conn.getResponseCode() != 200) {
+            throw new RuntimeException("HTTP " + conn.getResponseCode());
+        }
+
+        BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            sb.append(line);
+        }
+        reader.close();
+
+        JSONObject root = new JSONObject(sb.toString());
+        JSONArray arr = root.getJSONArray("entries");
+
+        RemoteListResponse resp = new RemoteListResponse();
+        resp.path = root.optString("path", path);
+
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject obj = arr.getJSONObject(i);
+            resp.entries.add(new RemoteEntry(
+                obj.optString("name"),
+                obj.optBoolean("isDir", false),
+                obj.optLong("size", 0L),
+                obj.optLong("mtime", 0L)
+            ));
+        }
+
+        return resp;
+    }
+
+    public String readFile(String path) throws Exception {
+        String urlString = baseUrl + "/api/read?path=" + URLEncoder.encode(path, "UTF-8");
+        URL url = new URL(urlString);
+
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(15000);
+        if (token != null && !token.isEmpty()) {
+            conn.setRequestProperty("X-API-Token", token);
+        }
+
+        if (conn.getResponseCode() != 200) {
+            throw new RuntimeException("HTTP " + conn.getResponseCode());
+        }
+
+        BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            sb.append(line).append('\n');
+        }
+        reader.close();
+        return sb.toString();
+    }
+
+    public void writeFile(String path, String content) throws Exception {
+        String urlString = baseUrl + "/api/write";
+        URL url = new URL(urlString);
+
+        JSONObject payload = new JSONObject();
+        payload.put("path", path);
+        payload.put("content", content);
+
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(15000);
+        conn.setRequestProperty("Content-Type", "application/json");
+        if (token != null && !token.isEmpty()) {
+            conn.setRequestProperty("X-API-Token", token);
+        }
+
+        OutputStream os = conn.getOutputStream();
+        os.write(payload.toString().getBytes("UTF-8"));
+        os.flush();
+        os.close();
+
+        if (conn.getResponseCode() != 200) {
+            throw new RuntimeException("HTTP " + conn.getResponseCode());
+        }
+    }
+}
+*/

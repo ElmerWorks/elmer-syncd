@@ -1,0 +1,45 @@
+project_name: elmer-syncd
+builds:
+  - id: elmer-syncd
+    main: ./cmd/elmer-syncd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+archives:
+  - id: default
+    files:
+      - README.md
+      - LICENSE
+      - start-elmer-syncd.ps1
+      - start-elmer-syncd.sh
+      - installer/**
+      - packaging/linux/elmer-syncd.service
+    format:
+      - tar.gz
+      - zip
+checksum:
+  name_template: "checksums.txt"
+signs:
+  - artifacts: all
+    args: ["--use-agent"]
+    cmd: gpg
+archives:
+  - id: linux
+    format: tar.gz
+    replacements:
+      darwin: macOS
+  - id: windows
+    format: zip
+snapshot:
+  name_template: "snapshot-{{ .Commit }}"
+release:
+  github:
+    owner: your-org-or-user
+    name: elmer-syncd
+  sign: true

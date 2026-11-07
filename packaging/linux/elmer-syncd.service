@@ -1,0 +1,12 @@
+[Unit]
+Description=ElmerSyncd daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/elmer-syncd --root /var/lib/elmer-syncd --port 12345 --token mytoken
+Restart=on-failure
+User=elmer
+
+[Install]
+WantedBy=multi-user.target

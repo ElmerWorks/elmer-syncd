@@ -2,6 +2,8 @@
 
 Minimal Go server for ElmerPad Desktop Sync
 
+I am documenting this code and will post updates soon.
+
 Run:
 
 ```bash

@@ -1,6 +1,6 @@
 # elmer-syncd
 
-Minimal Go server for ElmerPad Desktop Sync (Sprint 1)
+Minimal Go server for ElmerPad Desktop Sync
 
 Run:
 
